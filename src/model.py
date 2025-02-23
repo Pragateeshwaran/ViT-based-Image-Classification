@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # Custom Self-Attention Layer for multi-head attention mechanism
-class CustomSelfAttention(nn.Module):
+class SelfAttention(nn.Module):
     def __init__(self, embed_dim, num_heads):
         """Initialize self-attention layer parameters.
         
@@ -11,7 +11,7 @@ class CustomSelfAttention(nn.Module):
             embed_dim (int): Embedding dimension
             num_heads (int): Number of attention heads
         """
-        super(CustomSelfAttention, self).__init__()
+        super(SelfAttention, self).__init__()
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         assert embed_dim % num_heads == 0, "Embedding dimension must be divisible by number of heads"
@@ -62,7 +62,7 @@ class TransformerEncoder(nn.Module):
         """
         super(TransformerEncoder, self).__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
-        self.attn = CustomSelfAttention(embed_dim, num_heads)
+        self.attn = SelfAttention(embed_dim, num_heads)
         self.dropout1 = nn.Dropout(dropout)
         self.norm2 = nn.LayerNorm(embed_dim)
         self.mlp = nn.Sequential(
