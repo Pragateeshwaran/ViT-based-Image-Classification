@@ -1,85 +1,51 @@
 import os
-import cv2
-import numpy as np
-from tqdm import tqdm
-import torchvision.transforms as transforms
-from torchvision.datasets import ImageFolder
+import shutil
+import random
+from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
-# Data augmentation and preprocessing for training
-transform_train = transforms.Compose([
+def prepare_test_data(data_dir=r"asset/Data/train", test_dir=r"asset/Data/test", split_ratio=0.2):
+    """Creates test data by moving a portion of train data if /test does not exist."""
+    if not os.path.exists(test_dir):
+        os.makedirs(test_dir)
+        
+        for class_folder in os.listdir(data_dir):
+            class_path = os.path.join(data_dir, class_folder)
+            if os.path.isdir(class_path):
+                os.makedirs(os.path.join(test_dir, class_folder), exist_ok=True)
+
+                images = [img for img in os.listdir(class_path) if img.endswith(('.jpg', '.png'))]
+                random.shuffle(images)
+
+                num_test = int(len(images) * split_ratio)
+                test_images = images[:num_test]
+
+                for img in test_images:
+                    src = os.path.join(class_path, img)
+                    dest = os.path.join(test_dir, class_folder, img)
+                    shutil.move(src, dest)
+        print("✅ Test data prepared successfully!")
+    else:
+        print("✅ Test data already exists.")
+
+# Image transformations
+transform = transforms.Compose([
     transforms.Resize((256, 256)),
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(15),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 ])
 
-# Preprocessing for testing
-transform_test = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-])
+# Prepare test data if not exists
+if __name__ == "__main__":
+    prepare_test_data()
+    print("Data Processing completed successfully!")
 
-# Load datasets
-train_dataset = ImageFolder(root=r'asset\Data\train', transform=transform_train)
-test_dataset = ImageFolder(root=r'asset\Data\test', transform=transform_test)
+# Load data
+dataset_train = datasets.ImageFolder(r"asset/Data/train", transform=transform)
+dataset_test = datasets.ImageFolder(r"asset/Data/test", transform=transform)
 
-# Create data loaders
-train_loader = DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(dataset=test_dataset, batch_size=32, shuffle=False)
+train_loader = DataLoader(dataset_train, batch_size=64, shuffle=True)
+test_loader = DataLoader(dataset_test, batch_size=64, shuffle=True)
 
-def resize_with_padding(image, target_size=(256, 256), pad_color=(0, 0, 0)):
-    """Resize image with padding to maintain aspect ratio.
-    
-    Args:
-        image (np.ndarray): Input image
-        target_size (tuple): Desired output size
-        pad_color (tuple): Color for padding
-    Returns:
-        np.ndarray: Resized and padded image
-    """
-    h, w = image.shape[:2]
-    scale = min(target_size[0] / h, target_size[1] / w)
-    new_w, new_h = int(w * scale), int(h * scale)
-
-    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    delta_w, delta_h = target_size[1] - new_w, target_size[0] - new_h
-    top, bottom = delta_h // 2, delta_h - (delta_h // 2)
-    left, right = delta_w // 2, delta_w - (delta_w // 2)
-
-    return cv2.copyMakeBorder(resized, top, bottom, left, right, 
-                            cv2.BORDER_CONSTANT, value=pad_color)
-
-def resize_images():
-    """Process and resize all images in dataset."""
-    dataset_path = "./data"
-    folders = ["train", "test"]
-
-    for folder in folders:
-        folder_path = os.path.join(dataset_path, folder)
-        for subfolder in os.listdir(folder_path):
-            subfolder_path = os.path.join(folder_path, subfolder)
-            if not os.path.isdir(subfolder_path):
-                continue
-
-            print(f"Processing: {subfolder_path}")
-            for img_name in tqdm(os.listdir(subfolder_path)):
-                img_path = os.path.join(subfolder_path, img_name)
-                if not img_name.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tiff")):
-                    continue
-
-                image = cv2.imread(img_path)
-                if image is None:
-                    print(f"Skipping corrupted image: {img_path}")
-                    continue
-
-                resized_image = resize_with_padding(image)
-                cv2.imwrite(img_path, resized_image)
-
-    print("✅ All images resized successfully!")
-
-if __name__ == '__main__':
-    resize_images()
+print(f"the train data has {len(dataset_train)} images")
+print(f"the test data has {len(dataset_test)} images")

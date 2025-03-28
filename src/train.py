@@ -1,81 +1,112 @@
 import torch
-from torch import nn
-import torch.nn.functional as F
+import torch.nn as nn
+import torch.optim as optim
 from model import ViT
 from DataProcessing import train_loader, test_loader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import os
+import time
 
-# Training configuration and setup
-def train_model():
-    """Main training function for ViT model."""
-    # Device configuration
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ViT().to(device)
+# Ensure checkpoints directory exists
+os.makedirs('checkpoints', exist_ok=True)
 
-    # Optimizer and loss function setup
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.01)
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    num_epochs = 100
-    
-    # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Training loop
-    for epoch in range(num_epochs):
+model = ViT().to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.01)
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
+
+log_file = r"checkpoints\training_log.txt"
+with open(log_file, "w") as f:
+    f.write("Epoch, Loss, Accuracy, Time\n")
+
+def visualize_predictions(model, test_loader, device, num_images=6):
+    model.eval()
+    images, labels = next(iter(test_loader))
+    images, labels = images.to(device), labels.to(device)
+    outputs = model(images)
+    _, predicted = torch.max(outputs, 1)
+
+    plt.figure(figsize=(12, 6))
+    for i in range(num_images):
+        plt.subplot(2, 3, i + 1)
+        img = images[i].cpu().permute(1, 2, 0).numpy()
+        plt.imshow(img)
+        plt.title(f'Pred: {predicted[i].item()} | Label: {labels[i].item()}')
+        plt.axis("off")
+    plt.show()
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# model = ViT().to(device)
+# model.load_state_dict(torch.load("F:\works\A-important\A-neurals\ViT\checkpoints\model_epoch_60.pth"))
+# model.eval() 
+# print("Model loaded successfully.")
+def train(model, train_loader, optimizer, criterion, device, epochs=500):
+    best_loss = float('inf')
+    patience, patience_limit = 0, 50
+
+    for epoch in range(epochs):
+        start_time = time.time()
         model.train()
         total_loss = 0.0
-        for images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
+
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", leave=False)
+
+        for images, labels in progress_bar:
             images, labels = images.to(device), labels.to(device)
+
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-            total_loss += loss.item()
-        scheduler.step()
-        avg_loss = total_loss / len(train_loader)
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
 
-    # Testing loop
+            total_loss += loss.item()
+            progress_bar.set_postfix(loss=loss.item())
+
+        scheduler.step()
+
+        avg_loss = total_loss / len(train_loader)
+        epoch_time = time.time() - start_time
+
+        print(f"Epoch [{epoch+1}/{epochs}], Loss: {avg_loss:.4f}, Time: {epoch_time:.2f}s")
+
+        with open(log_file, "a") as f:
+            f.write(f"{epoch+1}, {avg_loss:.4f}, {epoch_time:.2f}s\n")
+
+        if (epoch + 1) % 10 == 0:
+            visualize_predictions(model, test_loader, device)
+            torch.save(model.state_dict(), f"checkpoints/afteroptim_model_epoch_{epoch+1}.pth")
+
+        if avg_loss < best_loss:    
+            best_loss = avg_loss
+            patience = 0
+            torch.save(model.state_dict(), "checkpoints/afteroptim_best_model.pth")
+        else:
+            patience += 1
+
+        if patience >= patience_limit:
+            print("Early stopping triggered.")
+            break
+
+def test(model, test_loader, device):
     model.eval()
     correct, total = 0, 0
+
     with torch.no_grad():
         for images, labels in test_loader:
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
-            _, predicted = torch.max(outputs, dim=1)
+            _, predicted = torch.max(outputs, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
     accuracy = 100 * correct / total
-    print(f"Test Accuracy: {accuracy:.2f}%")
-    return model
+    print(f'Test Accuracy: {accuracy:.2f}%')
 
-# Visualization of predictions
-def visualize_predictions(model):
-    """Visualize model predictions on test samples.
-    
-    Args:
-        model (nn.Module): Trained ViT model
-    """
-    model.eval()
-    images, labels = next(iter(test_loader))
-    device = next(model.parameters()).device
-    images, labels = images.to(device), labels.to(device)
-    outputs = model(images)
-    _, predicted = torch.max(outputs, dim=1)
-    
-    # Create visualization
-    fig, axes = plt.subplots(1, 6, figsize=(15, 3))
-    for i in range(6):
-        img = images[i].cpu().permute(1, 2, 0)
-        img = (img * 0.5 + 0.5).clamp(0, 1)  # Denormalize
-        axes[i].imshow(img)
-        axes[i].set_title(f"Pred: {predicted[i].item()}, Label: {labels[i].item()}")
-        axes[i].axis("off")
-    plt.show()
-
-if __name__ == "__main__":
-    trained_model = train_model()
-    visualize_predictions(trained_model)
+train(model, train_loader, optimizer, criterion, device)
+test(model, test_loader, device)
+visualize_predictions(model, test_loader, device)
